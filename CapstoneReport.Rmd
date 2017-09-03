@@ -1,0 +1,787 @@
+---
+title: "Capstone: Project Report"
+author: "Eric Henderson"
+date: August 31, 2017
+output: html_document
+---
+
+# Report Summary
+This report details the construction of prediction data used to suggest the next word to follow a user provided phrase. A collection of text from blogs, news, and twitter was used as source material for the construction of the prediction model. Exploration finds the three source text files varied in number of lines and total words. A small random sample of each text file is selected and combined into a new source document for relational analysis. The combined document is then processed to prepare for analysis. Relationships within the text are analyzed by evaluating N-grams of lengths from one to six. N-grams are created for text with, and without, common words (stop words) for comparison. The N-grams generated in this report provide key insights into the nature of the word relations as well as creating the data needed for a predictive text model. The primary insight being that stop words may not be easily discarded and may play a large role in processing input for the predictive model. Ultimately, n-grams with stop words included are used for the predictive tables.
+
+# Data Loading
+Packages used in this report and the supplied data files are loaded for use. The files are each roughly a quarter of a gigabyte in size once loaded into R.
+```{r, echo=TRUE, results="hide", message=FALSE}
+# load needed packages
+library(ggplot2)
+library(tm)
+library(stylo)
+library(stringi)
+```
+
+```{r, echo=TRUE, cache=TRUE, message=FALSE, results='hide', warning=FALSE}
+# read in text data
+con <- file("en_US.blogs.txt", "rb")
+blog <- readLines(con)
+close(con)
+con <- file("en_US.news.txt", "rb")
+news <- readLines(con)
+close(con)
+con <- file("en_US.twitter.txt", "rb")
+twitter <- readLines(con)
+close(con)
+con <- url("http://www.bannedwordlist.com/lists/swearWords.txt")
+cursewords <- readLines(con)
+close(con)
+
+rm(con)
+```
+
+# Data Exploration
+The supplied text comes in three files, where each file contains text from a different source. Text sources include "blog", "twitter", and "news". In this section, an overview of the files will be presented, focusing on total lines per file, total words per file, and average words per line.
+
+### Total Lines
+The twitter text contains over double the number of lines of text compared to the blog text and news text. News and blog texts have similar amounts of lines.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Calculate total lines per file and display
+lines <- data.frame(c("Blog", "News", "Twitter"),
+                    c(NROW(blog), NROW(news), NROW(twitter)))
+names(lines) <- c("Text", "Lines")
+lines
+ggplot (lines, aes(x = Text, y = Lines)) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +
+  labs(title = "Total Lines per Text") +
+  xlab( "Texts" ) + ylab( "Total Lines" )
+```
+
+### Total Words
+While the twitter text has double the lines of the other texts, it has fewer total words than either of the others (containing a total word size roughly 80% of the number of words found in the blog text). Blog and news texts have similar total word numbers.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Calculate total words per file and display
+tempBlog <- unlist(strsplit(blog, split=" "))
+tempNews <- unlist(strsplit(news, split=" "))
+tempTwitter <- unlist(strsplit(twitter, split=" "))
+words <- data.frame(c("Blog", "News", "Twitter"),
+                    c(NROW(tempBlog), NROW(tempNews), NROW(tempTwitter)))
+names(words) <- c("Text", "Words")
+rm(tempBlog)
+rm(tempNews)
+rm(tempTwitter)
+words
+ggplot (words, aes(x = Text, y = Words)) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +
+  labs(title = "Total Words per Text") +
+  xlab( "Text" ) + ylab( "Total Words" )
+```
+
+### Words per Line
+As expected, given the high number of lines and lower total word count, the twitter text has the lowest ration of words to lines. The blog text, which had slightly more words and slightly fewer lines than the news text, comes in with the highest ratio.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Calculate average words per line
+ratio <- data.frame(c("Blog", "News", "Twitter"),
+                    c(words$Words[1]/lines$Lines[1],
+                      words$Words[2]/lines$Lines[2],
+                      words$Words[3]/lines$Lines[3]))
+names(ratio) <- c("Text", "Ratio")
+ratio
+ggplot (ratio, aes(x = Text, y = Ratio)) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +
+  labs(title = "Average Words per Line per Text") +
+  xlab( "Text" ) + ylab( "Average Words per Line" )
+rm(ratio)
+rm(lines)
+rm(words)
+```
+
+# Corpus Creation
+This section details the creation and processing of the corpus text, which will be the source text used for creation of the predictive text model.
+
+### Sampling and Combine
+Given the size of the data sets a random subset of each text source will be taken and then combined to form the corpus. Different size samples are used for different sized n-grams. Much of the diversity of lower sized n-grams is captured in smaller samples. Finding frequent n-grams of larger sizes requires larger sample sizes. Sample sizes range from ten percent, for 2-grams, to fourty percent for 6-grams.
+```{r, echo=TRUE, cache=TRUE, results="hide", message=FALSE}
+# Sample a portion of the text data
+blogRows <- NROW(blog)
+blogSubSet <- sample(blog, blogRows*.1)
+newsRows <- NROW(news)
+newsSubSet <- sample(news, newsRows*.1)
+twitterRows <- NROW(twitter)
+twitterSubSet <- sample(twitter, twitterRows*.1)
+
+combine <- c(blogSubSet, newsSubSet, twitterSubSet)
+
+blogRows <- NROW(blog)
+blogSubSet <- sample(blog, blogRows*.15)
+newsRows <- NROW(news)
+newsSubSet <- sample(news, newsRows*.15)
+twitterRows <- NROW(twitter)
+twitterSubSet <- sample(twitter, twitterRows*.15)
+
+combine2 <- c(blogSubSet, newsSubSet, twitterSubSet)
+
+blogRows <- NROW(blog)
+blogSubSet <- sample(blog, blogRows*.25)
+newsRows <- NROW(news)
+newsSubSet <- sample(news, newsRows*.25)
+twitterRows <- NROW(twitter)
+twitterSubSet <- sample(twitter, twitterRows*.25)
+
+combine3 <- c(blogSubSet, newsSubSet, twitterSubSet)
+
+blogRows <- NROW(blog)
+blogSubSet <- sample(blog, blogRows*.3)
+newsRows <- NROW(news)
+newsSubSet <- sample(news, newsRows*.3)
+twitterRows <- NROW(twitter)
+twitterSubSet <- sample(twitter, twitterRows*.3)
+
+combine4 <- c(blogSubSet, newsSubSet, twitterSubSet)
+
+blogRows <- NROW(blog)
+blogSubSet <- sample(blog, blogRows*.4)
+newsRows <- NROW(news)
+newsSubSet <- sample(news, newsRows*.4)
+twitterRows <- NROW(twitter)
+twitterSubSet <- sample(twitter, twitterRows*.4)
+
+combine5 <- c(blogSubSet, newsSubSet, twitterSubSet)
+
+rm(blog)
+rm(blogRows)
+rm(news)
+rm(newsRows)
+rm(twitter)
+rm(twitterRows)
+rm(blogSubSet)
+rm(newsSubSet)
+rm(twitterSubSet)
+
+preCorpus <- unlist(strsplit(combine, split=" "))
+preCorpus2 <- unlist(strsplit(combine2, split=" "))
+preCorpus3 <- unlist(strsplit(combine3, split=" "))
+preCorpus4 <- unlist(strsplit(combine4, split=" "))
+preCorpus5 <- unlist(strsplit(combine5, split=" "))
+```
+
+### Processing and Clean Up
+The corpus is processed to remove unwanted symbols and words, as well as reducing all characters to lower case. Two types of corpus data sets are created, one with common words and one without. Corpus data with stop words included is further seperated into sets for each sample size. Curse words are stripped from all text sets. After processing the two corpus types have any empty strings (left over from processing) removed.
+```{r, echo=TRUE, cache=TRUE, results="hide", message=FALSE}
+# Construct and process corpus
+preCorpus <- sapply(preCorpus, tolower)
+preCorpus <- gsub("â€™", "'", preCorpus)
+#preCorpus <- gsub("[[:punct:]]", "", preCorpus, perl = TRUE)
+preCorpus <- gsub("[^'[:lower:]]", "", preCorpus)
+preCorpus <- gsub("â|€|™|˜|œ|„|Â", "", preCorpus)
+preCorpus <- gsub("^'*$", "", preCorpus)
+preCorpus <- gsub("^'s$", "", preCorpus)
+cursewords <- paste(cursewords, collapse = "$|^")
+cursewords <- paste('^', cursewords, '$', collapse = '')
+cursewords <- gsub(" ", "", cursewords)
+preCorpus <- gsub(cursewords, "", preCorpus)
+# find all strings that are empty or all numeric, then remove
+numsAndEmpty <- grep("^[[:digit:]]*$", preCorpus)
+preCorpus <- preCorpus[-numsAndEmpty]
+#stops <- grep(paste(stopwords("english"), collapse = "|"), preCorpus)
+#theCorpusWithoutStops <- preCorpus[-stops]
+modStops <- paste(stopwords("english"), collapse = "$|^")
+modStops <- paste('^', modStops, '$', collapse = '')
+modStops <- gsub(" ", "", modStops)
+theCorpusWithoutStops <- gsub(modStops, "", preCorpus)
+empties <- grep("^$", theCorpusWithoutStops)
+theCorpusWithoutStops <- theCorpusWithoutStops[-empties]
+theCorpus <- preCorpus
+
+preCorpus2 <- sapply(preCorpus2, tolower)
+preCorpus2 <- gsub("â€™", "'", preCorpus2)
+preCorpus2 <- gsub("[^'[:lower:]]", "", preCorpus2)
+preCorpus2 <- gsub("â|€|™|˜|œ|„|Â", "", preCorpus2)
+preCorpus2 <- gsub("^'*$", "", preCorpus2)
+preCorpus2 <- gsub("^'s$", "", preCorpus2)
+preCorpus2 <- gsub(cursewords, "", preCorpus2)
+# find all strings that are empty or all numeric, then remove
+numsAndEmpty <- grep("^[[:digit:]]*$", preCorpus2)
+preCorpus2 <- preCorpus2[-numsAndEmpty]
+theCorpus2 <- preCorpus2
+
+preCorpus3 <- sapply(preCorpus3, tolower)
+preCorpus3 <- gsub("â€™", "'", preCorpus3)
+preCorpus3 <- gsub("[^'[:lower:]]", "", preCorpus3)
+preCorpus3 <- gsub("â|€|™|˜|œ|„|Â", "", preCorpus3)
+preCorpus3 <- gsub("^'*$", "", preCorpus3)
+preCorpus3 <- gsub("^'s$", "", preCorpus3)
+preCorpus3 <- gsub(cursewords, "", preCorpus3)
+# find all strings that are empty or all numeric, then remove
+numsAndEmpty <- grep("^[[:digit:]]*$", preCorpus3)
+preCorpus3 <- preCorpus3[-numsAndEmpty]
+theCorpus3 <- preCorpus3
+
+preCorpus4 <- sapply(preCorpus4, tolower)
+preCorpus4 <- gsub("â€™", "'", preCorpus4)
+preCorpus4 <- gsub("[^'[:lower:]]", "", preCorpus4)
+preCorpus4 <- gsub("â|€|™|˜|œ|„|Â", "", preCorpus4)
+preCorpus4 <- gsub("^'*$", "", preCorpus4)
+preCorpus4 <- gsub("^'s$", "", preCorpus4)
+preCorpus4 <- gsub(cursewords, "", preCorpus4)
+# find all strings that are empty or all numeric, then remove
+numsAndEmpty <- grep("^[[:digit:]]*$", preCorpus4)
+preCorpus4 <- preCorpus4[-numsAndEmpty]
+theCorpus4 <- preCorpus4
+
+preCorpus5 <- sapply(preCorpus5, tolower)
+preCorpus5 <- gsub("â€™", "'", preCorpus5)
+preCorpus5 <- gsub("[^'[:lower:]]", "", preCorpus5)
+preCorpus5 <- gsub("â|€|™|˜|œ|„|Â", "", preCorpus5)
+preCorpus5 <- gsub("^'*$", "", preCorpus5)
+preCorpus5 <- gsub("^'s$", "", preCorpus5)
+preCorpus5 <- gsub(cursewords, "", preCorpus5)
+# find all strings that are empty or all numeric, then remove
+numsAndEmpty <- grep("^[[:digit:]]*$", preCorpus5)
+preCorpus5 <- preCorpus5[-numsAndEmpty]
+theCorpus5 <- preCorpus5
+```
+
+# Analyzing Corpus via N-grams
+N-grams are constructed in this section of varying length to see which sequence of words are most frequent and to begin to understand which words are likely to appear after others. N-grams such as these will be used as part of the predictive model.
+
+### Unigrams
+Unigrams may be too short to assist with prediction, other then to suggest a starting word, but are helpful as part of exploring the contents of the corpus and getting a sense of what words are present. Unsurprisingly the unigrams from the corpus including common words is dominated by those common words.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Unigram and display top 25
+unigram <- data.frame(table(make.ngrams(theCorpus, ngram.size = 1)))
+colnames(unigram)<-c("Phrase","Frequency")
+sortedUnigram <- unigram[order(-unigram$Freq),]
+topUnigram <- sortedUnigram[1:25,]
+colnames(topUnigram)<-c("Phrase","Frequency")
+topUnigram$Phrase <- factor(topUnigram$Phrase, levels = topUnigram$Phrase)
+
+ggplot (topUnigram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Unigrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Unigram, with stops removed, and display top 25
+unigramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 1)))
+colnames(unigramws)<-c("Phrase","Frequency")
+sortedUnigramws <- unigramws[order(-unigramws$Freq),]
+topUnigramws <- sortedUnigramws[1:25,]
+colnames(topUnigramws)<-c("Phrase","Frequency")
+topUnigramws$Phrase <- factor(topUnigramws$Phrase, levels = topUnigramws$Phrase)
+
+ggplot (topUnigramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Unigrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### Bigrams
+Similar to the unigrams the bigrams for the corpus including common words is largely comprised of common word pairings. In the bigrams for the corpus without stop words we see some of the benefit of N-grams for text prediction, with many showing strong candidate suggestions for words based on the word prior. 
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Bigram and display top 25
+bigram <- data.frame(table(make.ngrams(theCorpus, ngram.size = 2)))
+colnames(bigram)<-c("Phrase","Frequency")
+sortedBigram <- bigram[order(-bigram$Freq),]
+topBigram <- sortedBigram[1:25,]
+colnames(topBigram)<-c("Phrase","Frequency")
+topBigram$Phrase <- factor(topBigram$Phrase, levels = topBigram$Phrase)
+
+ggplot (topBigram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Bigrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Bigram, with stops removed, and display top 25
+bigramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 2)))
+colnames(bigramws)<-c("Phrase","Frequency")
+sortedBigramws <- bigramws[order(-bigramws$Freq),]
+topBigramws <- sortedBigramws[1:25,]
+colnames(topBigramws)<-c("Phrase","Frequency")
+topBigramws$Phrase <- factor(topBigramws$Phrase, levels = topBigramws$Phrase)
+
+ggplot (topBigramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Bigrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### Trigrams
+At trigram length we finally start to see phrases within the stop word corpus that could suggest non-stop words with any consistency. A larger concern is that the non-stop word trigrams appear to have "false" phrases, where the phrase would not show up in text without stop words intermixed. The top phrase is a prime example of these "false" phrases, as "cant wait see" would not commonly appear in a text and instead abstractly represents the phrase "cant wait to see".
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Trigram and display top 25
+trigram <- data.frame(table(make.ngrams(theCorpus2, ngram.size = 3)))
+colnames(trigram)<-c("Phrase","Frequency")
+sortedTrigram <- trigram[order(-trigram$Freq),]
+topTrigram <- sortedTrigram[1:25,]
+colnames(topTrigram)<-c("Phrase","Frequency")
+topTrigram$Phrase <- factor(topTrigram$Phrase, levels = topTrigram$Phrase)
+
+ggplot (topTrigram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Trigrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Trigram, with stops removed, and display top 25
+trigramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 3)))
+colnames(trigramws)<-c("Phrase","Frequency")
+sortedTrigramws <- trigramws[order(-trigramws$Freq),]
+topTrigramws <- sortedTrigramws[1:25,]
+colnames(topTrigramws)<-c("Phrase","Frequency")
+topTrigramws$Phrase <- factor(topTrigramws$Phrase, levels = topTrigramws$Phrase)
+
+ggplot (topTrigramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Trigrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### Quadgrams
+As we increase n-gram size we continue to see more predictive utility from the text data containing stop words. Interestingly the non-stop word data is starting to become cluttered with non-sense phrases that are clearly not part of normal written works, but instead part of meta information within the source text.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create quadgram and display top 25
+quadgram <- data.frame(table(make.ngrams(theCorpus3, ngram.size = 4)))
+colnames(quadgram)<-c("Phrase","Frequency")
+sortedQuadgram <- quadgram[order(-quadgram$Freq),]
+topQuadgram <- sortedQuadgram[1:25,]
+colnames(topQuadgram)<-c("Phrase","Frequency")
+topQuadgram$Phrase <- factor(topQuadgram$Phrase, levels = topQuadgram$Phrase)
+
+ggplot (topQuadgram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Quadgrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create quadgram, with stops removed, and display top 25
+quadgramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 4)))
+colnames(quadgramws)<-c("Phrase","Frequency")
+sortedQuadgramws <- quadgramws[order(-quadgramws$Freq),]
+topQuadgramws <- sortedQuadgramws[1:25,]
+colnames(topQuadgramws)<-c("Phrase","Frequency")
+topQuadgramws$Phrase <- factor(topQuadgramws$Phrase, levels = topQuadgramws$Phrase)
+
+ggplot (topQuadgramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Quadgrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### Pentagrams
+Much of the same observations present in quadgrams are relevant to pentagrams. Non-stop word n-grams continues to be intermixed with repeated meta information in the source text, however some now meta text phrases seem to be making their way into the more frequent pentagrams.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create pentagram and display top 25
+pentagram <- data.frame(table(make.ngrams(theCorpus4, ngram.size = 5)))
+colnames(pentagram)<-c("Phrase","Frequency")
+sortedPentagram <- pentagram[order(-pentagram$Freq),]
+topPentagram <- sortedPentagram[1:25,]
+colnames(topPentagram)<-c("Phrase","Frequency")
+topPentagram$Phrase <- factor(topPentagram$Phrase, levels = topPentagram$Phrase)
+
+ggplot (topPentagram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Pentagrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create pentagram, with stops removed, and display top 25
+pentagramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 5)))
+colnames(pentagramws)<-c("Phrase","Frequency")
+sortedPentagramws <- pentagramws[order(-pentagramws$Freq),]
+topPentagramws <- sortedPentagramws[1:25,]
+colnames(topPentagramws)<-c("Phrase","Frequency")
+topPentagramws$Phrase <- factor(topPentagramws$Phrase, levels = topPentagramws$Phrase)
+
+ggplot (topPentagramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Pentagrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### 6-grams
+For 6-grams, only text containing stop words is used. The phrases present appear natural and seem like strong candidates for use in suggesting words. Phrases do still contain significant amounts of common words, which may limit the frequency of suggested words being non-stop words.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create sixgram and display top 25
+sixgram <- data.frame(table(make.ngrams(theCorpus5, ngram.size = 6)))
+colnames(sixgram)<-c("Phrase","Frequency")
+sortedSixgram <- sixgram[order(-sixgram$Freq),]
+topSixgram <- sortedSixgram[1:25,]
+colnames(topSixgram)<-c("Phrase","Frequency")
+topSixgram$Phrase <- factor(topSixgram$Phrase, levels = topSixgram$Phrase)
+
+ggplot (topSixgram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top 6-grams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+# Combine N-grams to Constuct Prediction Table
+The least frequent n-gram phrases are removed from each set. The last word in each phrase is seperated from the phrase to become the suggested word. When a particular row's phrase is matched the final word can be suggested. The length of the phrase is also stored in the row. Suggested words will first be sorted by length of matched phrase and then secondly by frequency of the phrase.
+
+### Clear Uncommon Words from N-grams
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedSixgram$Freq > 2
+sortedSixgram <- sortedSixgram[commons,]
+
+ggplot (sortedSixgram, aes(sortedSixgram$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "6-grams Frequency Distribution - Including Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedPentagram$Freq > 2
+sortedPentagram <- sortedPentagram[commons,]
+
+ggplot (sortedPentagram, aes(sortedPentagram$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "pentagrams Frequency Distribution - Including Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedQuadgram$Freq > 3
+sortedQuadgram <- sortedQuadgram[commons,]
+
+ggplot (sortedQuadgram, aes(sortedQuadgram$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "Quadgrams Frequency Distribution - Including Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedQuadgramws$Freq > 3
+sortedQuadgramws <- sortedQuadgramws[commons,]
+
+ggplot (sortedQuadgramws, aes(sortedQuadgramws$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "Quadgrams Frequency Distribution - Excluding Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedTrigram$Freq > 8
+sortedTrigram <- sortedTrigram[commons,]
+
+ggplot (sortedTrigram, aes(sortedTrigram$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "Trigrams Frequency Distribution - Including Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedTrigramws$Freq > 3
+sortedTrigramws <- sortedTrigramws[commons,]
+
+ggplot (sortedTrigramws, aes(sortedTrigramws$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "Trigrams Frequency Distribution - Excluding Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedBigram$Freq > 10
+sortedBigram <- sortedBigram[commons,]
+
+ggplot (sortedBigram, aes(sortedBigram$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "Bigrams Frequency Distribution - Including Stop Words")
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Clear uncommons
+commons <- sortedBigramws$Freq > 6
+sortedBigramws <- sortedBigramws[commons,]
+
+ggplot (sortedBigramws, aes(sortedBigramws$Freq)) + 
+  geom_histogram(bins = 10) +
+  xlab( "Frequency" ) + ylab( "Frequency Occurence" ) +
+  labs(title = "Bigrams Frequency Distribution - Including Stop Words")
+```
+
+### Split Last Word into Seperate Column
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedSixgram$Phrase, stri_extract_last_words)
+#sortedSixgram <- cbind(sortedSixgram, ends)
+sortedSixgram$ends <- sortedSixgram$Phrase
+sortedSixgram$ends <- gsub(sortedSixgram$ends, pattern = "[a-z']* ", replacement = "")
+sortedSixgram$Phrase <- sub(sortedSixgram$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(5, NROW(sortedSixgram))
+sortedSixgram <- cbind(sortedSixgram, length)
+head(sortedSixgram, 5)
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedPentagram$Phrase, stri_extract_last_words)
+#sortedPentagram <- cbind(sortedPentagram, ends)
+sortedPentagram$ends <- sortedPentagram$Phrase
+sortedPentagram$ends <- gsub(sortedPentagram$ends, pattern = "[a-z']* ", replacement = "")
+sortedPentagram$Phrase <- sub(sortedPentagram$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(4, NROW(sortedPentagram))
+sortedPentagram <- cbind(sortedPentagram, length)
+head(sortedPentagram, 5)
+```
+
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedQuadgram$Phrase, stri_extract_last_words)
+#sortedQuadgram <- cbind(sortedQuadgram, ends)
+sortedQuadgram$ends <- sortedQuadgram$Phrase
+sortedQuadgram$ends <- gsub(sortedQuadgram$ends, pattern = "[a-z']* ", replacement = "")
+sortedQuadgram$Phrase <- sub(sortedQuadgram$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(3, NROW(sortedQuadgram))
+sortedQuadgram <- cbind(sortedQuadgram, length)
+head(sortedQuadgram, 5)
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedQuadgramws$Phrase, stri_extract_last_words)
+#sortedQuadgramws <- cbind(sortedQuadgramws, ends)
+sortedQuadgramws$ends <- sortedQuadgramws$Phrase
+sortedQuadgramws$ends <- gsub(sortedQuadgramws$ends, pattern = "[a-z']* ", replacement = "")
+sortedQuadgramws$Phrase <- sub(sortedQuadgramws$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(3, NROW(sortedQuadgramws))
+sortedQuadgramws <- cbind(sortedQuadgramws, length)
+head(sortedQuadgramws, 5)
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedTrigram$Phrase, stri_extract_last_words)
+#sortedTrigram <- cbind(sortedTrigram, ends)
+sortedTrigram$ends <- sortedTrigram$Phrase
+sortedTrigram$ends <- gsub(sortedTrigram$ends, pattern = "[a-z']* ", replacement = "")
+sortedTrigram$Phrase <- sub(sortedTrigram$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(2, NROW(sortedTrigram))
+sortedTrigram <- cbind(sortedTrigram, length)
+head(sortedTrigram, 5)
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedTrigramws$Phrase, stri_extract_last_words)
+#sortedTrigramws <- cbind(sortedTrigramws, ends)
+sortedTrigramws$ends <- sortedTrigramws$Phrase
+sortedTrigramws$ends <- gsub(sortedTrigramws$ends, pattern = "[a-z']* ", replacement = "")
+sortedTrigramws$Phrase <- sub(sortedTrigramws$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(2, NROW(sortedTrigramws))
+sortedTrigramws <- cbind(sortedTrigramws, length)
+head(sortedTrigramws, 5)
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedBigram$Phrase, stri_extract_last_words)
+#sortedBigram <- cbind(sortedBigram, ends)
+sortedBigram$ends <- sortedBigram$Phrase
+sortedBigram$ends <- gsub(sortedBigram$ends, pattern = "[a-z']* ", replacement = "")
+sortedBigram$Phrase <- sub(sortedBigram$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(1, NROW(sortedBigram))
+sortedBigram <- cbind(sortedBigram, length)
+head(sortedBigram, 5)
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create new column containing last word of phrase
+#ends <- sapply(sortedBigramws$Phrase, stri_extract_last_words)
+#sortedBigramws <- cbind(sortedBigramws, ends)
+sortedBigramws$ends <- sortedBigramws$Phrase
+sortedBigramws$ends <- gsub(sortedBigramws$ends, pattern = "[a-z']* ", replacement = "")
+sortedBigramws$Phrase <- sub(sortedBigramws$Phrase, pattern = " [a-z']*$", replacement = "")
+length <- rep(1, NROW(sortedBigramws))
+sortedBigramws <- cbind(sortedBigramws, length)
+head(sortedBigramws, 5)
+```
+
+### Scale Frequency Based on Word Catergory
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Half frequency of stop words and resort tables
+stopSpots <- grep(modStops, sortedSixgram$ends)
+sortedSixgram$Frequency[stopSpots] <- sortedSixgram$Frequency[stopSpots] / 2 
+sortedSixgram <- sortedSixgram[order(-sortedSixgram$Freq),]
+
+stopSpots <- grep(modStops, sortedPentagram$ends)
+sortedPentagram$Frequency[stopSpots] <- sortedPentagram$Frequency[stopSpots] / 2 
+sortedPentagram <- sortedPentagram[order(-sortedPentagram$Freq),]
+
+stopSpots <- grep(modStops, sortedQuadgram$ends)
+sortedQuadgram$Frequency[stopSpots] <- sortedQuadgram$Frequency[stopSpots] / 2 
+sortedQuadgram <- sortedQuadgram[order(-sortedQuadgram$Freq),]
+
+stopSpots <- grep(modStops, sortedTrigram$ends)
+sortedTrigram$Frequency[stopSpots] <- sortedTrigram$Frequency[stopSpots] / 2 
+sortedTrigram <- sortedTrigram[order(-sortedTrigram$Freq),]
+
+stopSpots <- grep(modStops, sortedBigram$ends)
+sortedBigram$Frequency[stopSpots] <- sortedBigram$Frequency[stopSpots] / 2 
+sortedBigram <- sortedBigram[order(-sortedBigram$Freq),]
+```
+
+### Create Default Output Table
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create defualt table
+defaultSuggests <- c("is", "a", "to", "the", "and", "for", "with", "from", "by", "or")
+```
+
+# Example Code for Prediction from tables
+A functional excerpt of the code from the main loop of the prediction algorithm for finding word suggestions from a supplied phrase. The input phrase is parsed and then matched against the phrases in th repdiction tables. The search is halted once ten matches have been found. The top results are then compiled into an output string.
+
+The final source code, for both the ui.R and server.R, can be found at: https://github.com/Eric-Henderson-127/DataScienceCapstone
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Test run
+sentence <- "An example for this is a"
+phrase <- sentence
+sentence <- unlist(strsplit(sentence, split=" "))
+sentence <- sapply(sentence, tolower)
+sentence <- gsub("[^'[:lower:]]", "", sentence)
+sentence <- gsub("â|€|™|˜|œ|„|Â", "", sentence)
+sentence <- gsub("^'*$", "", sentence)
+sentence <- gsub("^'s$", "", sentence)
+numsAndEmpty <- grep("^[[:digit:]]*$", sentence)
+if(length(numsAndEmpty) > 0)
+{
+  sentence <- sentence[-numsAndEmpty] 
+}
+results <- data.frame(Phrase=character(),
+                      Frequency=integer(),
+                      ends=character(),
+                      length=integer())
+if(length(sentence) > 5)
+{
+  trim <- (length(sentence) - 5) + 1
+  sentence <- sentence[trim:length(sentence)]
+}
+if(length(sentence) == 5 && NROW(results) < 10)
+{
+  tempSentence <- paste(sentence, collapse = " ")
+  tempSentence <- paste("^", tempSentence, "$")
+  tempSentence <- sub("\\^ ", "^", tempSentence)
+  tempSentence <- sub(" \\$", "$", tempSentence)
+  temp <- grep(tempSentence, sortedSixgram$Phrase)
+  results <- rbind(results, sortedSixgram[temp,])
+  sentence <- sentence[2:length(sentence)]
+}
+if(length(sentence) == 4 && NROW(results) < 10)
+{
+  tempSentence <- paste(sentence, collapse = " ")
+  tempSentence <- paste("^", tempSentence, "$")
+  tempSentence <- sub("\\^ ", "^", tempSentence)
+  tempSentence <- sub(" \\$", "$", tempSentence)
+  temp <- grep(paste(tempSentence, collapse = " "), sortedPentagram$Phrase)
+  results <- rbind(results, sortedPentagram[temp,])
+  sentence <- sentence[2:length(sentence)]
+}
+if(length(sentence) == 3 && NROW(results) < 10)
+{
+  tempSentence <- paste(sentence, collapse = " ")
+  tempSentence <- paste("^", tempSentence, "$")
+  tempSentence <- sub("\\^ ", "^", tempSentence)
+  tempSentence <- sub(" \\$", "$", tempSentence)
+  temp <- grep(paste(tempSentence, collapse = " "), sortedQuadgram$Phrase)
+  results <- rbind(results, sortedQuadgram[temp,])
+  sentence <- sentence[2:length(sentence)]
+}
+if(length(sentence) == 2 && NROW(results) < 10)
+{
+  tempSentence <- paste(sentence, collapse = " ")
+  tempSentence <- paste("^", tempSentence, "$")
+  tempSentence <- sub("\\^ ", "^", tempSentence)
+  tempSentence <- sub(" \\$", "$", tempSentence)
+  temp <- grep(paste(tempSentence, collapse = " "), sortedTrigram$Phrase)
+  results <- rbind(results, sortedTrigram[temp,])
+  sentence <- sentence[2:length(sentence)]
+}
+if(length(sentence) == 1 && NROW(results) < 10)
+{
+  tempSentence <- paste(sentence, collapse = " ")
+  tempSentence <- paste("^", tempSentence, "$")
+  tempSentence <- sub("\\^ ", "^", tempSentence)
+  tempSentence <- sub(" \\$", "$", tempSentence)
+  temp <- grep(paste(tempSentence, collapse = " "), sortedBigram$Phrase)
+  results <- rbind(results, sortedBigram[temp,])
+}
+if(NROW(results) >= 10)
+{
+  theSubset <- results[1:10,]
+}
+if(NROW(results) < 10)
+{
+  theSubset <- results[1:NROW(results),]
+}
+if(is.na(theSubset$ends[1]))
+{
+  theSubset <- theSubset[-1,]
+}
+if(length(theSubset) > 0)
+{
+  suggested <- as.character(theSubset$ends)
+  suggested <- c(suggested, defaultSuggests)
+  suggested <- unique(suggested)
+}
+if(length(theSubset) == 0)
+{
+  suggested <- defaultSuggests
+}
+
+if(length(suggested) >= 5)
+{
+  suggested <- suggested[1:5]
+}
+if(length(suggested) < 5)
+{
+  suggested <- suggested[1:length(suggested)]
+}
+theSubset <- theSubset[1:5,]
+saveRDS(phrase, "phraseData.rds")
+saveRDS(suggested, "suggestedData.rds")
+saveRDS(theSubset, "subsetData.rds")
+suggested
+```
+
+# Export Prediction Tables
+Finally, the constructed prediction tables are written out to CSV files to be used by the shiny application.
+```{r, echo=TRUE, cache=TRUE}
+# Export tables
+write.csv(sortedSixgram, file = "data/prediction_table_sixgram.csv", row.names = FALSE)
+write.csv(sortedPentagram, file = "data/prediction_table_pentagram.csv", row.names = FALSE)
+write.csv(sortedQuadgram, file = "data/prediction_table_quadgram.csv", row.names = FALSE)
+write.csv(sortedTrigram, file = "data/prediction_table_trigram.csv", row.names = FALSE)
+write.csv(sortedBigram, file = "data/prediction_table_bigram.csv", row.names = FALSE)
+```

@@ -1,0 +1,248 @@
+---
+title: "Capstone: Milestone Report"
+author: "Eric Henderson"
+date: August 8, 2017
+output: html_document
+---
+
+# Report Summary
+The goal of this report is to do some basic exploration of the provided text data as well as some initial analysis of the relations within the text for future predictive modeling. Exploration finds the three text files varied in number of lines and total words. A small random sample of each text file is selected and combined into a new source document for relational analysis. The combined document is then processed to prepare for analysis. Relationships within the text are analyzed by evaluating N-grams of length one, two, and three. N-grams are created for text with, and without, common words (stop words) for comparison. The N-grams generated in this report provide key insights into the nature of the word relations as well as providing a starting point for creating the data needed for a predictive text model. The primary insight being that stop words may not be easily discarded and may play a large role in processing input for the predictive model.
+
+# Data Loading
+Packages used in this report and the supplied data files are loaded for use. The files are each roughly a quarter of a gigabyte in size once loaded into R.
+```{r, echo=TRUE, results="hide", message=FALSE}
+# load needed packages
+library(ggplot2)
+library(tm)
+library(stylo)
+```
+
+```{r, echo=TRUE, cache=TRUE, message=FALSE, results='hide', warning=FALSE}
+# read in text data
+con <- file("en_US.blogs.txt", "rb")
+blog <- readLines(con)
+close(con)
+con <- file("en_US.news.txt", "rb")
+news <- readLines(con)
+close(con)
+con <- file("en_US.twitter.txt", "rb")
+twitter <- readLines(con)
+close(con)
+
+rm(con)
+```
+
+# Data Exploration
+The supplied text comes in three files, where each file contains text from a different source. Text sources include "blog", "twitter", and "news". In this section, an overview of the files will be presented, focusing on total lines per file, total words per file, and average words per line.
+
+### Total Lines
+The twitter text contains over double the number of lines of text compared to the blog text and news text. News and blog texts have similar amounts of lines.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Calculate total lines per file and display
+lines <- data.frame(c("Blog", "News", "Twitter"),
+                    c(NROW(blog), NROW(news), NROW(twitter)))
+names(lines) <- c("Text", "Lines")
+lines
+ggplot (lines, aes(x = Text, y = Lines)) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +
+  labs(title = "Total Lines per Text") +
+  xlab( "Texts" ) + ylab( "Total Lines" )
+```
+
+### Total Words
+While the twitter text has double the lines of the other texts, it has fewer total words than either of the others (roughly 80% of the words in the blog text). Blog and news texts have similar total word numbers.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Calculate total words per file and display
+tempBlog <- unlist(strsplit(blog, split=" "))
+tempNews <- unlist(strsplit(news, split=" "))
+tempTwitter <- unlist(strsplit(twitter, split=" "))
+words <- data.frame(c("Blog", "News", "Twitter"),
+                    c(NROW(tempBlog), NROW(tempNews), NROW(tempTwitter)))
+names(words) <- c("Text", "Words")
+rm(tempBlog)
+rm(tempNews)
+rm(tempTwitter)
+words
+ggplot (words, aes(x = Text, y = Words)) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +
+  labs(title = "Total Words per Text") +
+  xlab( "Text" ) + ylab( "Total Words" )
+```
+
+### Words per Line
+As expected, given the high number of lines and lower total word count, the twitter text has the lowest ration of words to lines. The blog text, which had slightly more words and slightly fewer lines than the news text, comes in with the highest ratio.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Calculate average words per line
+ratio <- data.frame(c("Blog", "News", "Twitter"),
+                    c(words$Words[1]/lines$Lines[1],
+                      words$Words[2]/lines$Lines[2],
+                      words$Words[3]/lines$Lines[3]))
+names(ratio) <- c("Text", "Ratio")
+ratio
+ggplot (ratio, aes(x = Text, y = Ratio)) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +
+  labs(title = "Average Words per Line per Text") +
+  xlab( "Text" ) + ylab( "Average Words per Line" )
+```
+
+# Corpus Creation
+This section details the creation and processing of the corpus text, which will be the source text used for creation of the predictive text model.
+
+### Sampling and Combine
+Given the size of the data sets a random subset of each text source will be taken and then combined to form the corpus.
+```{r, echo=TRUE, cache=TRUE, results="hide", message=FALSE}
+# Sample a portion of the text data
+blogRows <- NROW(blog)
+blogSubSet <- sample(blog, blogRows*.01)
+newsRows <- NROW(news)
+newsSubSet <- sample(news, newsRows*.01)
+twitterRows <- NROW(twitter)
+twitterSubSet <- sample(twitter, twitterRows*.01)
+
+rm(blog)
+rm(blogRows)
+rm(news)
+rm(newsRows)
+rm(twitter)
+rm(twitterRows)
+
+combine <- c(blogSubSet, newsSubSet, twitterSubSet)
+
+rm(blogSubSet)
+rm(newsSubSet)
+rm(twitterSubSet)
+
+preCorpus <- unlist(strsplit(combine, split=" "))
+```
+
+### Processing and Clean Up
+The corpus is processed to remove unwanted symbols and words, as well as reducing all characters to lower case. Two corpus data sets are created, one with common words and one without. After processing the two corpus have any empty strings (left over from processing) removed.
+```{r, echo=TRUE, cache=TRUE, results="hide", message=FALSE}
+# Construct and process corpus
+docs <- VCorpus(VectorSource(preCorpus))
+docs <- tm_map(docs, removePunctuation)
+docs <- tm_map(docs, removeNumbers) 
+docs <- tm_map(docs, tolower)
+docs <- tm_map(docs, PlainTextDocument)
+docsWithoutStops <- docs
+docsWithoutStops <- tm_map(docsWithoutStops, removeWords, stopwords("english"))
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs, PlainTextDocument)
+docsWithoutStops <- tm_map(docsWithoutStops, stripWhitespace)
+docsWithoutStops <- tm_map(docsWithoutStops, PlainTextDocument)
+
+theCorpus <- data.frame(text = sapply(docs, as.character), stringsAsFactors = FALSE)
+notempty <- theCorpus$text != ""
+theCorpus <- theCorpus[notempty,]
+theCorpusWithoutStops <- data.frame(text = sapply(docsWithoutStops, as.character), stringsAsFactors = FALSE)
+notemptywstops <- theCorpusWithoutStops$text != ""
+theCorpusWithoutStops <- theCorpusWithoutStops[notemptywstops,]
+```
+
+# Analyzing Corpus via N-grams
+N-grams are constructed in this section of varying length to see which sequence of words are most frequent and to begin to understand which words are likely to appear after others. N-grams such as these will be used as part of the predictive model.
+
+### Unigrams
+Unigrams may be too short to assist with prediction, other then to suggest a starting word, but are helpful as part of exploring the contents of the corpus and getting a sense of what words are present. Unsurprisingly the unigrams from the corpus including common words is dominated by those common words.
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Unigram and display top 25
+unigram <- data.frame(table(make.ngrams(theCorpus, ngram.size = 1)))
+sortedUnigram <- unigram[order(-unigram$Freq),]
+topUnigram <- sortedUnigram[1:25,]
+colnames(topUnigram)<-c("Phrase","Frequency")
+topUnigram$Phrase <- factor(topUnigram$Phrase, levels = topUnigram$Phrase)
+
+ggplot (topUnigram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Unigrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Unigram, with stops removed, and display top 25
+unigramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 1)))
+sortedUnigramws <- unigramws[order(-unigramws$Freq),]
+topUnigramws <- sortedUnigramws[1:25,]
+colnames(topUnigramws)<-c("Phrase","Frequency")
+topUnigramws$Phrase <- factor(topUnigramws$Phrase, levels = topUnigramws$Phrase)
+
+ggplot (topUnigramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Unigrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### Bigrams
+Similar to the unigrams the bigrams for the corpus including common words is largely comprised of common word pairings. In the bigrams for the corpus without stop words we see some of the benefit of N-grams for text prediction, with many showing strong candidate suggestions for words based on the word prior. 
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Bigram and display top 25
+bigram <- data.frame(table(make.ngrams(theCorpus, ngram.size = 2)))
+sortedBigram <- bigram[order(-bigram$Freq),]
+topBigram <- sortedBigram[1:25,]
+colnames(topBigram)<-c("Phrase","Frequency")
+topBigram$Phrase <- factor(topBigram$Phrase, levels = topBigram$Phrase)
+
+ggplot (topBigram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Bigrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Bigram, with stops removed, and display top 25
+bigramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 2)))
+sortedBigramws <- bigramws[order(-bigramws$Freq),]
+topBigramws <- sortedBigramws[1:25,]
+colnames(topBigramws)<-c("Phrase","Frequency")
+topBigramws$Phrase <- factor(topBigramws$Phrase, levels = topBigramws$Phrase)
+
+ggplot (topBigramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Bigrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+### Trigrams
+At trigram length we finally start to see phrases within the stop word corpus that could suggest non-stop words with any consistency. A larger concern is that the non-stop word trigrams appear to have "false" phrases, where the phrase would not show up in text without stop words intermixed. The top phrase is a prime example of these "false" phrases, as "cant wait see" would not commonly appear in a text and instead abstractly represents the phrase "cant wait to see".
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Trigram and display top 25
+trigram <- data.frame(table(make.ngrams(theCorpus, ngram.size = 3)))
+sortedTrigram <- trigram[order(-trigram$Freq),]
+topTrigram <- sortedTrigram[1:25,]
+colnames(topTrigram)<-c("Phrase","Frequency")
+topTrigram$Phrase <- factor(topTrigram$Phrase, levels = topTrigram$Phrase)
+
+ggplot (topTrigram, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "blue" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Trigrams for Corpus - Including Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+```{r, echo=TRUE, cache=TRUE, fig.width = 10}
+# Create Trigram, with stops removed, and display top 25
+trigramws <- data.frame(table(make.ngrams(theCorpusWithoutStops, ngram.size = 3)))
+sortedTrigramws <- trigramws[order(-trigramws$Freq),]
+topTrigramws <- sortedTrigramws[1:25,]
+colnames(topTrigramws)<-c("Phrase","Frequency")
+topTrigramws$Phrase <- factor(topTrigramws$Phrase, levels = topTrigramws$Phrase)
+
+ggplot (topTrigramws, aes(x = Phrase, y= Frequency )) + 
+  geom_bar( stat = "Identity" , fill = "magenta" ) +  
+  geom_text( aes (label = Frequency ) , vjust = - 0.20, size = 3 ) +
+  xlab( "Phrases" ) + ylab( "Frequency" ) +
+  labs(title = "Top Trigrams for Corpus - Excluding Stop Words") +
+  theme ( axis.text.x = element_text ( angle = 45 , hjust = 1 ) )
+```
+
+# Conclusions
+Exploring the text shows a wealth of data, from various sources, from which to construct a corpus. The source data is so large that only using a subset is necessary for processing in a reasonable amount of time and requiring a reasonable amount of space. The use of N-grams as part of the prediction model seems prudent, though extra considerations need to be made when utilizing them. A key concern is the inclusion, or exclusion, of stop words. As seen, stop words can bog down the data with too many extra N-grams, but failure to include them makes unnatural phrases in larger N-grams and hinders the ability of the predictor to suggest a stop word when needed. The predictive model will clearly need to handle stop words in some form in order to best predict words. A combination of N-grams with both stop and non-stop corpus may be needed, especially for the larger N-grams used in the model.
